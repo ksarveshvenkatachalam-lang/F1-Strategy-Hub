@@ -429,18 +429,33 @@ if dashboard_section in ["Overview", "Pit Stop Strategy"] and pit_stops is not N
         with col2:
             st.markdown("#### 📈 Pit Stop Efficiency Trend")
             # Average duration by lap
-            if 'lap' in filtered_pit_stops.columns:
+            if 'lap' in filtered_pit_stops.columns and len(filtered_pit_stops) > 0:
                 efficiency = filtered_pit_stops.groupby('lap')['duration'].mean().reset_index()
+                
+                # Create scatter plot without trendline (to avoid statsmodels dependency)
                 fig = px.scatter(
                     efficiency,
                     x='lap',
                     y='duration',
-                    trendline="lowess",
                     labels={'lap': 'Lap Number', 'duration': 'Avg Duration (s)'},
                     color_discrete_sequence=['#667eea']
                 )
-                fig.update_layout(height=400)
+                
+                # Add a simple line to show trend
+                fig.add_trace(
+                    go.Scatter(
+                        x=efficiency['lap'],
+                        y=efficiency['duration'],
+                        mode='lines',
+                        line=dict(color='#E10600', width=2),
+                        name='Trend'
+                    )
+                )
+                
+                fig.update_layout(height=400, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data for trend analysis")
         
         # Top 10 Fastest Pit Stops
         st.markdown("#### 🏆 Top 10 Fastest Pit Stops")
