@@ -1,3 +1,4 @@
+
 """
 F1 STRATEGY DASHBOARD - Phase 1: Circuit Foundation
 Interactive F1 analytics focusing on circuits and race strategy
@@ -83,11 +84,69 @@ def load_races():
         st.stop()
 
 # Load data
-circuits = load_circuits()
-races = load_races()
+circ = load_circuits()
+rcs = load_races()
+
+# ---------------------------------------------------------------------------
+# Normalize column names to avoid KeyError on merges
+#
+# The F1 datasets sometimes include column names with varying cases or
+# underscores (e.g. `circuitId`, `circuit_id`). To ensure a robust merge we
+# normalise both dataframes: strip whitespace and search for a case-insensitive
+# match to the expected `circuitId` column. If found, the column is renamed to
+# `circuitId`. The same logic is applied to the `year` column for races. This
+# prevents KeyError exceptions when `merge` is called.
+
+def _normalise_columns(df: pd.DataFrame, key: str) -> pd.DataFrame:
+    """
+    Normalise dataframe columns to ensure a specified key exists. If the key
+    does not exist exactly but a case-insensitive match exists, rename it.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataframe whose columns will be normalised.
+    key : str
+        The target column name that must be present (e.g. 'circuitId').
+
+    Returns
+    -------
+    pd.DataFrame
+        The dataframe with the target column guaranteed to exist.
+    """
+    # Strip whitespace from column names
+    df.columns = df.columns.str.strip()
+    if key not in df.columns:
+        lower_key = key.lower()
+        # search for a case-insensitive match
+        for col in df.columns:
+            if col.lower() == lower_key:
+                df = df.rename(columns={col: key})
+                break
+    return df
+
+# Normalise key columns
+circ = _normalise_columns(circ, 'circuitId')
+rcs = _normalise_columns(rcs, 'circuitId')
+rcs = _normalise_columns(rcs, 'year')
+
+circuits = circ
+races = rcs
+
+if 'circuitId' not in circuits.columns or 'circuitId' not in races.columns:
+    st.error(
+        "The 'circuitId' column is missing from the dataset. Please verify "
+        "that the input CSV files contain a column for circuit identifiers."
+    )
+    st.stop()
 
 # Merge circuits with races to get complete info
-races_with_circuits = races.merge(circuits, on='circuitId', how='left', suffixes=('_race', '_circuit'))
+races_with_circuits = races.merge(
+    circuits,
+    on='circuitId',
+    how='left',
+    suffixes=('_race', '_circuit')
+)
 
 # ============================================================================
 # HEADER
