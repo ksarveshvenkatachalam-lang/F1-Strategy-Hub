@@ -1,4 +1,3 @@
-
 """
 F1 STRATEGY DASHBOARD - Phase 1: Circuit Foundation
 Interactive F1 analytics focusing on circuits and race strategy
@@ -58,93 +57,81 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ============================================================================
-# LOAD DATA
+# LOAD DATA WITH ROBUST ERROR HANDLING
 # ============================================================================
 @st.cache_data
 def load_circuits():
-    """Load circuit data"""
+    """Load and clean circuit data"""
     try:
         circuits = pd.read_csv('circuits.csv')
-        circuits = circuits.dropna(subset=['lat', 'lng'])  # Remove circuits without coordinates
+        
+        # Clean column names - remove extra spaces and standardize
+        circuits.columns = circuits.columns.str.strip().str.lower()
+        
+        # Show columns for debugging
+        st.sidebar.write("🔍 Circuits columns:", list(circuits.columns))
+        
+        # Check for required columns
+        required_cols = ['circuitid', 'name', 'location', 'country', 'lat', 'lng']
+        missing = [col for col in required_cols if col not in circuits.columns]
+        
+        if missing:
+            st.error(f"❌ Missing columns in circuits.csv: {missing}")
+            st.error(f"Available columns: {list(circuits.columns)}")
+            st.stop()
+        
+        # Remove circuits without coordinates
+        circuits = circuits.dropna(subset=['lat', 'lng'])
+        
         return circuits
+    except FileNotFoundError:
+        st.error("❌ circuits.csv not found! Please upload the file to your repository.")
+        st.stop()
     except Exception as e:
-        st.error(f"Error loading circuits.csv: {e}")
+        st.error(f"❌ Error loading circuits.csv: {e}")
         st.stop()
 
 @st.cache_data
 def load_races():
-    """Load race data"""
+    """Load and clean race data"""
     try:
         races = pd.read_csv('races.csv')
+        
+        # Clean column names - remove extra spaces and standardize
+        races.columns = races.columns.str.strip().str.lower()
+        
+        # Show columns for debugging
+        st.sidebar.write("🔍 Races columns:", list(races.columns))
+        
+        # Check for required columns
+        required_cols = ['raceid', 'year', 'circuitid', 'name', 'date']
+        missing = [col for col in required_cols if col not in races.columns]
+        
+        if missing:
+            st.error(f"❌ Missing columns in races.csv: {missing}")
+            st.error(f"Available columns: {list(races.columns)}")
+            st.stop()
+        
         # Convert date to datetime
         races['date'] = pd.to_datetime(races['date'], errors='coerce')
+        
         return races
+    except FileNotFoundError:
+        st.error("❌ races.csv not found! Please upload the file to your repository.")
+        st.stop()
     except Exception as e:
-        st.error(f"Error loading races.csv: {e}")
+        st.error(f"❌ Error loading races.csv: {e}")
         st.stop()
 
 # Load data
-circ = load_circuits()
-rcs = load_races()
-
-# ---------------------------------------------------------------------------
-# Normalize column names to avoid KeyError on merges
-#
-# The F1 datasets sometimes include column names with varying cases or
-# underscores (e.g. `circuitId`, `circuit_id`). To ensure a robust merge we
-# normalise both dataframes: strip whitespace and search for a case-insensitive
-# match to the expected `circuitId` column. If found, the column is renamed to
-# `circuitId`. The same logic is applied to the `year` column for races. This
-# prevents KeyError exceptions when `merge` is called.
-
-def _normalise_columns(df: pd.DataFrame, key: str) -> pd.DataFrame:
-    """
-    Normalise dataframe columns to ensure a specified key exists. If the key
-    does not exist exactly but a case-insensitive match exists, rename it.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The dataframe whose columns will be normalised.
-    key : str
-        The target column name that must be present (e.g. 'circuitId').
-
-    Returns
-    -------
-    pd.DataFrame
-        The dataframe with the target column guaranteed to exist.
-    """
-    # Strip whitespace from column names
-    df.columns = df.columns.str.strip()
-    if key not in df.columns:
-        lower_key = key.lower()
-        # search for a case-insensitive match
-        for col in df.columns:
-            if col.lower() == lower_key:
-                df = df.rename(columns={col: key})
-                break
-    return df
-
-# Normalise key columns
-circ = _normalise_columns(circ, 'circuitId')
-rcs = _normalise_columns(rcs, 'circuitId')
-rcs = _normalise_columns(rcs, 'year')
-
-circuits = circ
-races = rcs
-
-if 'circuitId' not in circuits.columns or 'circuitId' not in races.columns:
-    st.error(
-        "The 'circuitId' column is missing from the dataset. Please verify "
-        "that the input CSV files contain a column for circuit identifiers."
-    )
-    st.stop()
+circuits = load_circuits()
+races = load_races()
 
 # Merge circuits with races to get complete info
 races_with_circuits = races.merge(
-    circuits,
-    on='circuitId',
-    how='left',
+    circuits, 
+    on='circuitid',  # Now using lowercase
+    how='left', 
     suffixes=('_race', '_circuit')
 )
 
@@ -197,7 +184,7 @@ st.sidebar.info(f"""
 📊 **Data Summary**
 - **Total Circuits:** {len(circuits)}
 - **Countries:** {circuits['country'].nunique()}
-- **Years:** {races['year'].min()} - {races['year'].max()}
+- **Years:** {int(races['year'].min())} - {int(races['year'].max())}
 - **Total Races:** {len(races):,}
 """)
 
@@ -262,17 +249,16 @@ st.markdown("---")
 # ============================================================================
 st.subheader("🗺️ F1 Circuits Around the World")
 
-# Create hover text with circuit details
-filtered_circuits['hover_text'] = (
-    '<b>' + filtered_circuits['name'] + '</b><br>' +
-    filtered_circuits['location'] + ', ' + filtered_circuits['country'] + '<br>' +
-    'Altitude: ' + filtered_circuits['alt'].astype(str) + 'm'
-)
-
 # Count races per circuit for sizing
-races_per_circuit = filtered_races.groupby('circuitId').size().reset_index(name='race_count')
-map_data = filtered_circuits.merge(races_per_circuit, on='circuitId', how='left')
+races_per_circuit = filtered_races.groupby('circuitid').size().reset_index(name='race_count')
+map_data = filtered_circuits.merge(races_per_circuit, on='circuitid', how='left')
 map_data['race_count'] = map_data['race_count'].fillna(0)
+
+# Create hover text
+map_data['hover_text'] = (
+    '<b>' + map_data['name'] + '</b><br>' +
+    map_data['location'] + ', ' + map_data['country']
+)
 
 # Create world map
 fig_map = px.scatter_geo(
@@ -432,19 +418,25 @@ st.markdown("---")
 st.subheader("📋 Circuit Details")
 
 # Prepare display data
-display_circuits = filtered_circuits[['name', 'location', 'country', 'lat', 'lng', 'alt']].copy()
-display_circuits.columns = ['Circuit Name', 'Location', 'Country', 'Latitude', 'Longitude', 'Altitude (m)']
+display_circuits = filtered_circuits[['name', 'location', 'country', 'lat', 'lng']].copy()
+
+# Add altitude if available
+if 'alt' in filtered_circuits.columns:
+    display_circuits['alt'] = filtered_circuits['alt']
+    display_circuits.columns = ['Circuit Name', 'Location', 'Country', 'Latitude', 'Longitude', 'Altitude (m)']
+else:
+    display_circuits.columns = ['Circuit Name', 'Location', 'Country', 'Latitude', 'Longitude']
 
 # Add race count
-circuit_race_counts = filtered_races.groupby('circuitId').size().reset_index(name='Total Races')
+circuit_race_counts = filtered_races.groupby('circuitid').size().reset_index(name='Total Races')
 display_circuits = display_circuits.merge(
-    circuits[['name', 'circuitId']], 
+    circuits[['name', 'circuitid']], 
     left_on='Circuit Name', 
     right_on='name', 
     how='left'
-).merge(circuit_race_counts, on='circuitId', how='left')
+).merge(circuit_race_counts, on='circuitid', how='left')
 display_circuits['Total Races'] = display_circuits['Total Races'].fillna(0).astype(int)
-display_circuits = display_circuits.drop(['name', 'circuitId'], axis=1)
+display_circuits = display_circuits.drop(['name', 'circuitid'], axis=1)
 
 # Sort by total races
 display_circuits = display_circuits.sort_values('Total Races', ascending=False)
@@ -465,7 +457,7 @@ st.subheader("💡 Key Insights")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    if len(filtered_circuits) > 0:
+    if len(filtered_circuits) > 0 and 'alt' in filtered_circuits.columns:
         # Highest altitude circuit
         highest_circuit = filtered_circuits.loc[filtered_circuits['alt'].idxmax()]
         st.info(f"""
@@ -477,11 +469,14 @@ with col1:
         
         Altitude: {highest_circuit['alt']:,}m
         """)
+    else:
+        st.info("**⛰️ Altitude data not available**")
 
 with col2:
     if len(filtered_races) > 0:
         # Most races in a single year
-        max_races_year = races_per_year.loc[races_per_year['races'].idxmax()]
+        races_per_year_temp = filtered_races.groupby('year').size().reset_index(name='races')
+        max_races_year = races_per_year_temp.loc[races_per_year_temp['races'].idxmax()]
         st.success(f"""
         **📅 Most Races in a Season**
         
@@ -491,12 +486,13 @@ with col2:
         
         Busiest F1 calendar!
         """)
+    else:
+        st.success("**📅 Select filters to see insights**")
 
 with col3:
     if len(filtered_circuits) > 0:
         # Geographic spread
         lat_range = filtered_circuits['lat'].max() - filtered_circuits['lat'].min()
-        lng_range = filtered_circuits['lng'].max() - filtered_circuits['lng'].min()
         st.warning(f"""
         **🌍 Geographic Spread**
         
@@ -506,6 +502,8 @@ with col3:
         
         Truly global sport!
         """)
+    else:
+        st.warning("**🌍 Select filters to see insights**")
 
 # ============================================================================
 # FOOTER
