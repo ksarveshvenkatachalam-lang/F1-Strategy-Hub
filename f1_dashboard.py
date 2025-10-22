@@ -1,6 +1,6 @@
 """
-F1 STRATEGY DASHBOARD - Phase 1: Circuit Foundation
-Interactive F1 analytics focusing on circuits and race strategy
+F1 STRATEGY DASHBOARD - Complete Edition
+Phases 1-3: Circuit Foundation + Pit Stop Strategy + Performance Analysis
 Built with Streamlit & Plotly
 """
 
@@ -57,103 +57,94 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ============================================================================
-# LOAD DATA WITH ROBUST ERROR HANDLING
+# LOAD DATA FUNCTIONS
 # ============================================================================
 @st.cache_data
 def load_circuits():
-    """Load and clean circuit data"""
+    """Load circuit data"""
     try:
         circuits = pd.read_csv('circuits.csv')
-        
-        # Clean column names - remove extra spaces and standardize
         circuits.columns = circuits.columns.str.strip().str.lower()
-        
-        # Fix the first column name issue - rename 's' to 'circuitid' if it exists
         if circuits.columns[0] == 's':
             circuits.columns = ['circuitid'] + list(circuits.columns[1:])
-        elif 'circuitid' not in circuits.columns and len(circuits.columns) > 0:
-            # If first column is not 's' but also not 'circuitid', assume it's the ID
-            circuits.columns = ['circuitid'] + list(circuits.columns[1:])
-        
-        # Show columns for debugging
-        st.sidebar.write("🔍 Circuits columns (after fix):", list(circuits.columns))
-        
-        # Check for required columns
-        required_cols = ['circuitid', 'name', 'location', 'country', 'lat', 'lng']
-        missing = [col for col in required_cols if col not in circuits.columns]
-        
-        if missing:
-            st.error(f"❌ Missing columns in circuits.csv: {missing}")
-            st.error(f"Available columns: {list(circuits.columns)}")
-            st.stop()
-        
-        # Remove circuits without coordinates
         circuits = circuits.dropna(subset=['lat', 'lng'])
-        
         return circuits
-    except FileNotFoundError:
-        st.error("❌ circuits.csv not found! Please upload the file to your repository.")
-        st.stop()
     except Exception as e:
-        st.error(f"❌ Error loading circuits.csv: {e}")
+        st.error(f"Error loading circuits.csv: {e}")
         st.stop()
 
 @st.cache_data
 def load_races():
-    """Load and clean race data"""
+    """Load race data"""
     try:
         races = pd.read_csv('races.csv')
-        
-        # Clean column names - remove extra spaces and standardize
         races.columns = races.columns.str.strip().str.lower()
-        
-        # Show columns for debugging
-        st.sidebar.write("🔍 Races columns (after clean):", list(races.columns))
-        
-        # Check for required columns
-        required_cols = ['year', 'circuitid', 'name', 'date']
-        missing = [col for col in required_cols if col not in races.columns]
-        
-        if missing:
-            st.error(f"❌ Missing columns in races.csv: {missing}")
-            st.error(f"Available columns: {list(races.columns)}")
-            st.stop()
-        
-        # Convert date to datetime
         races['date'] = pd.to_datetime(races['date'], errors='coerce')
-        
         return races
-    except FileNotFoundError:
-        st.error("❌ races.csv not found! Please upload the file to your repository.")
-        st.stop()
     except Exception as e:
-        st.error(f"❌ Error loading races.csv: {e}")
+        st.error(f"Error loading races.csv: {e}")
         st.stop()
 
-# Load data
+@st.cache_data
+def load_pit_stops():
+    """Load pit stop data"""
+    try:
+        pit_stops = pd.read_csv('pit_stops.csv')
+        pit_stops.columns = pit_stops.columns.str.strip().str.lower()
+        # Convert duration to seconds if in milliseconds
+        if 'milliseconds' in pit_stops.columns and 'duration' not in pit_stops.columns:
+            pit_stops['duration'] = pit_stops['milliseconds'] / 1000
+        return pit_stops
+    except Exception as e:
+        st.error(f"Error loading pit_stops.csv: {e}")
+        return None
+
+@st.cache_data
+def load_constructors():
+    """Load constructor data"""
+    try:
+        constructors = pd.read_csv('constructors.csv')
+        constructors.columns = constructors.columns.str.strip().str.lower()
+        return constructors
+    except Exception as e:
+        st.error(f"Error loading constructors.csv: {e}")
+        return None
+
+@st.cache_data
+def load_results():
+    """Load race results data"""
+    try:
+        results = pd.read_csv('results.csv')
+        results.columns = results.columns.str.strip().str.lower()
+        # Convert position to numeric
+        results['position'] = pd.to_numeric(results['position'], errors='coerce')
+        results['points'] = pd.to_numeric(results['points'], errors='coerce')
+        return results
+    except Exception as e:
+        st.error(f"Error loading results.csv: {e}")
+        return None
+
+# Load all data
 circuits = load_circuits()
 races = load_races()
+pit_stops = load_pit_stops()
+constructors = load_constructors()
+results = load_results()
 
-# Merge circuits with races to get complete info
-races_with_circuits = races.merge(
-    circuits, 
-    on='circuitid',  # Now using lowercase
-    how='left', 
-    suffixes=('_race', '_circuit')
-)
+# Merge datasets
+races_with_circuits = races.merge(circuits, on='circuitid', how='left', suffixes=('_race', '_circuit'))
 
 # ============================================================================
 # HEADER
 # ============================================================================
 st.title("🏎️ F1 STRATEGY DASHBOARD")
-st.markdown("### Circuit Analysis & Strategic Insights")
+st.markdown("### Complete Analysis: Circuits | Pit Stops | Performance")
 st.markdown("---")
 
 # ============================================================================
 # SIDEBAR FILTERS
 # ============================================================================
-st.sidebar.header("🎯 Filters")
-st.sidebar.markdown("Customize your analysis")
+st.sidebar.header("🎯 Dashboard Filters")
 
 # Year filter
 available_years = sorted(races['year'].unique(), reverse=True)
@@ -161,22 +152,23 @@ selected_years = st.sidebar.multiselect(
     "Select Season(s):",
     options=available_years,
     default=[available_years[0]] if len(available_years) > 0 else [],
-    help="Choose F1 seasons to analyze"
+    help="Choose F1 seasons"
 )
 
-# Apply year filter
+# Apply filters
 if selected_years:
     filtered_races = races_with_circuits[races_with_circuits['year'].isin(selected_years)]
+    filtered_races_ids = filtered_races['raceid'].unique() if 'raceid' in filtered_races.columns else []
 else:
     filtered_races = races_with_circuits
+    filtered_races_ids = races['raceid'].unique() if 'raceid' in races.columns else []
 
 # Country filter
 countries = sorted(circuits['country'].unique())
 selected_countries = st.sidebar.multiselect(
-    "Select Country/Countries:",
+    "Select Countries:",
     options=countries,
-    default=[],
-    help="Filter circuits by country"
+    default=[]
 )
 
 if selected_countries:
@@ -185,332 +177,414 @@ if selected_countries:
 else:
     filtered_circuits = circuits
 
-# Info box
+# Dashboard section selector
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Navigate Dashboard")
+dashboard_section = st.sidebar.radio(
+    "Jump to Section:",
+    ["Overview", "Circuit Analysis", "Pit Stop Strategy", "Performance Analysis"]
+)
+
+# Summary stats
 st.sidebar.markdown("---")
 st.sidebar.info(f"""
-📊 **Data Summary**
-- **Total Circuits:** {len(circuits)}
-- **Countries:** {circuits['country'].nunique()}
-- **Years:** {int(races['year'].min())} - {int(races['year'].max())}
-- **Total Races:** {len(races):,}
+📊 **Data Loaded**
+- Circuits: {len(circuits)}
+- Races: {len(races):,}
+- Pit Stops: {len(pit_stops):,} if pit_stops is not None else "N/A"
+- Results: {len(results):,} if results is not None else "N/A"
 """)
 
 # ============================================================================
 # KEY METRICS ROW
 # ============================================================================
-st.subheader("📊 Key Statistics")
+st.subheader("📊 Dashboard Overview")
 
 col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
-    total_circuits = len(filtered_circuits)
-    st.metric(
-        label="🏁 Circuits",
-        value=total_circuits,
-        help="Total number of F1 circuits"
-    )
+    st.metric("🏁 Circuits", len(filtered_circuits))
 
 with col2:
-    countries_count = filtered_circuits['country'].nunique()
-    st.metric(
-        label="🌍 Countries",
-        value=countries_count,
-        help="Countries hosting F1 races"
-    )
+    st.metric("🏆 Races", f"{len(filtered_races):,}")
 
 with col3:
-    total_races = len(filtered_races)
-    st.metric(
-        label="🏆 Races",
-        value=f"{total_races:,}",
-        help="Total races in selected period"
-    )
+    if pit_stops is not None:
+        filtered_pit_stops = pit_stops[pit_stops['raceid'].isin(filtered_races_ids)]
+        st.metric("🔧 Pit Stops", f"{len(filtered_pit_stops):,}")
+    else:
+        st.metric("🔧 Pit Stops", "N/A")
 
 with col4:
-    if len(filtered_races) > 0:
-        avg_races_per_year = filtered_races.groupby('year').size().mean()
-        st.metric(
-            label="📅 Avg Races/Year",
-            value=f"{avg_races_per_year:.1f}",
-            help="Average races per season"
-        )
+    if results is not None:
+        filtered_results = results[results['raceid'].isin(filtered_races_ids)]
+        st.metric("🎯 Results", f"{len(filtered_results):,}")
     else:
-        st.metric(label="📅 Avg Races/Year", value="N/A")
+        st.metric("🎯 Results", "N/A")
 
 with col5:
-    if len(filtered_races) > 0:
-        most_races_circuit = filtered_races.groupby('name_circuit').size().idxmax()
-        most_races_count = filtered_races.groupby('name_circuit').size().max()
-        st.metric(
-            label="⭐ Most Races",
-            value=int(most_races_count),
-            help=f"Circuit: {most_races_circuit}"
-        )
-    else:
-        st.metric(label="⭐ Most Races", value="N/A")
+    st.metric("🌍 Countries", circuits['country'].nunique())
 
 st.markdown("---")
 
 # ============================================================================
-# WORLD MAP - INTERACTIVE CIRCUIT LOCATIONS
+# PHASE 1: CIRCUIT ANALYSIS
 # ============================================================================
-st.subheader("🗺️ F1 Circuits Around the World")
-
-# Count races per circuit for sizing
-races_per_circuit = filtered_races.groupby('circuitid').size().reset_index(name='race_count')
-map_data = filtered_circuits.merge(races_per_circuit, on='circuitid', how='left')
-map_data['race_count'] = map_data['race_count'].fillna(0)
-
-# Create hover text
-map_data['hover_text'] = (
-    '<b>' + map_data['name'] + '</b><br>' +
-    map_data['location'] + ', ' + map_data['country']
-)
-
-# Create world map
-fig_map = px.scatter_geo(
-    map_data,
-    lat='lat',
-    lon='lng',
-    hover_name='name',
-    hover_data={
-        'country': True,
-        'location': True,
-        'race_count': True,
-        'lat': False,
-        'lng': False
-    },
-    size='race_count',
-    size_max=30,
-    color='country',
-    title='',
-    projection='natural earth'
-)
-
-fig_map.update_layout(
-    height=500,
-    geo=dict(
-        showland=True,
-        landcolor='rgb(243, 243, 243)',
-        coastlinecolor='rgb(204, 204, 204)',
-        showocean=True,
-        oceancolor='rgb(230, 245, 255)',
-        showcountries=True,
-        countrycolor='rgb(204, 204, 204)'
-    ),
-    showlegend=False
-)
-
-st.plotly_chart(fig_map, use_container_width=True)
-
-st.markdown("---")
-
-# ============================================================================
-# ROW: CIRCUIT ANALYSIS
-# ============================================================================
-st.subheader("🏁 Circuit Insights")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    # Top 10 circuits by number of races
-    st.markdown("#### 🏆 Most Raced Circuits")
+if dashboard_section in ["Overview", "Circuit Analysis"]:
+    st.header("🗺️ Phase 1: Circuit Foundation")
     
-    if len(filtered_races) > 0:
-        top_circuits = (
-            filtered_races.groupby('name_circuit')
-            .size()
-            .reset_index(name='races')
-            .sort_values('races', ascending=False)
-            .head(10)
-        )
-        
-        fig_top_circuits = px.bar(
-            top_circuits,
-            x='races',
-            y='name_circuit',
-            orientation='h',
-            labels={'races': 'Number of Races', 'name_circuit': 'Circuit'},
-            color='races',
-            color_continuous_scale='Reds'
-        )
-        fig_top_circuits.update_layout(
-            showlegend=False,
-            yaxis={'categoryorder': 'total ascending'},
-            height=400,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig_top_circuits, use_container_width=True)
-    else:
-        st.info("No data available for selected filters")
-
-with col2:
-    # Races by country
-    st.markdown("#### 🌍 Races by Country")
+    # World Map
+    st.subheader("F1 Circuits Around the World")
+    races_per_circuit = filtered_races.groupby('circuitid').size().reset_index(name='race_count')
+    map_data = filtered_circuits.merge(races_per_circuit, on='circuitid', how='left')
+    map_data['race_count'] = map_data['race_count'].fillna(0)
     
-    if len(filtered_races) > 0:
-        races_by_country = (
-            filtered_races.groupby('country')
-            .size()
-            .reset_index(name='races')
-            .sort_values('races', ascending=False)
-            .head(10)
-        )
-        
-        fig_countries = px.bar(
-            races_by_country,
-            x='races',
-            y='country',
-            orientation='h',
-            labels={'races': 'Number of Races', 'country': 'Country'},
-            color='races',
-            color_continuous_scale='Blues'
-        )
-        fig_countries.update_layout(
-            showlegend=False,
-            yaxis={'categoryorder': 'total ascending'},
-            height=400,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig_countries, use_container_width=True)
-    else:
-        st.info("No data available for selected filters")
-
-st.markdown("---")
-
-# ============================================================================
-# TIMELINE - RACES PER YEAR
-# ============================================================================
-st.subheader("📈 F1 Calendar Evolution")
-
-if len(filtered_races) > 0:
-    races_per_year = (
-        filtered_races.groupby('year')
-        .size()
-        .reset_index(name='races')
-        .sort_values('year')
+    fig_map = px.scatter_geo(
+        map_data,
+        lat='lat',
+        lon='lng',
+        hover_name='name',
+        size='race_count',
+        size_max=30,
+        color='country',
+        projection='natural earth'
     )
+    fig_map.update_layout(height=500, showlegend=False)
+    st.plotly_chart(fig_map, use_container_width=True)
     
-    fig_timeline = px.line(
-        races_per_year,
-        x='year',
-        y='races',
-        markers=True,
-        labels={'year': 'Year', 'races': 'Number of Races'},
-        title='Number of Races per Season'
-    )
-    fig_timeline.update_traces(
-        line_color='#E10600',
-        line_width=3,
-        marker=dict(size=8, color='#E10600')
-    )
-    fig_timeline.update_layout(
-        hovermode='x unified',
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        height=400
-    )
+    # Circuit Analysis Row
+    col1, col2 = st.columns(2)
     
-    st.plotly_chart(fig_timeline, use_container_width=True)
-else:
-    st.info("No data available for selected filters")
-
-st.markdown("---")
+    with col1:
+        st.markdown("#### 🏆 Most Raced Circuits")
+        if len(filtered_races) > 0:
+            top_circuits = (
+                filtered_races.groupby('name_circuit')
+                .size()
+                .reset_index(name='races')
+                .sort_values('races', ascending=False)
+                .head(10)
+            )
+            
+            fig = px.bar(
+                top_circuits,
+                x='races',
+                y='name_circuit',
+                orientation='h',
+                color='races',
+                color_continuous_scale='Reds'
+            )
+            fig.update_layout(
+                showlegend=False,
+                yaxis={'categoryorder': 'total ascending'},
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("#### 🌍 Races by Country")
+        if len(filtered_races) > 0:
+            races_by_country = (
+                filtered_races.groupby('country')
+                .size()
+                .reset_index(name='races')
+                .sort_values('races', ascending=False)
+                .head(10)
+            )
+            
+            fig = px.bar(
+                races_by_country,
+                x='races',
+                y='country',
+                orientation='h',
+                color='races',
+                color_continuous_scale='Blues'
+            )
+            fig.update_layout(
+                showlegend=False,
+                yaxis={'categoryorder': 'total ascending'},
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
 
 # ============================================================================
-# DETAILED CIRCUIT TABLE
+# PHASE 2: PIT STOP STRATEGY
 # ============================================================================
-st.subheader("📋 Circuit Details")
-
-# Prepare display data
-display_circuits = filtered_circuits[['name', 'location', 'country', 'lat', 'lng']].copy()
-
-# Add altitude if available
-if 'alt' in filtered_circuits.columns:
-    display_circuits['alt'] = filtered_circuits['alt']
-    display_circuits.columns = ['Circuit Name', 'Location', 'Country', 'Latitude', 'Longitude', 'Altitude (m)']
-else:
-    display_circuits.columns = ['Circuit Name', 'Location', 'Country', 'Latitude', 'Longitude']
-
-# Add race count
-circuit_race_counts = filtered_races.groupby('circuitid').size().reset_index(name='Total Races')
-display_circuits = display_circuits.merge(
-    circuits[['name', 'circuitid']], 
-    left_on='Circuit Name', 
-    right_on='name', 
-    how='left'
-).merge(circuit_race_counts, on='circuitid', how='left')
-display_circuits['Total Races'] = display_circuits['Total Races'].fillna(0).astype(int)
-display_circuits = display_circuits.drop(['name', 'circuitid'], axis=1)
-
-# Sort by total races
-display_circuits = display_circuits.sort_values('Total Races', ascending=False)
-
-st.dataframe(
-    display_circuits,
-    use_container_width=True,
-    hide_index=True,
-    height=400
-)
-
-# ============================================================================
-# INSIGHTS SECTION
-# ============================================================================
-st.markdown("---")
-st.subheader("💡 Key Insights")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if len(filtered_circuits) > 0 and 'alt' in filtered_circuits.columns:
-        # Highest altitude circuit
-        highest_circuit = filtered_circuits.loc[filtered_circuits['alt'].idxmax()]
-        st.info(f"""
-        **⛰️ Highest Elevation**
+if dashboard_section in ["Overview", "Pit Stop Strategy"] and pit_stops is not None:
+    st.header("🔧 Phase 2: Pit Stop Strategy Analysis")
+    
+    # Filter pit stops for selected races
+    filtered_pit_stops = pit_stops[pit_stops['raceid'].isin(filtered_races_ids)]
+    
+    if len(filtered_pit_stops) > 0:
+        # Pit Stop Metrics
+        col1, col2, col3, col4 = st.columns(4)
         
-        **{highest_circuit['name']}**
+        with col1:
+            avg_duration = filtered_pit_stops['duration'].mean()
+            st.metric("⚡ Avg Pit Stop", f"{avg_duration:.3f}s")
         
-        {highest_circuit['location']}, {highest_circuit['country']}
+        with col2:
+            fastest_stop = filtered_pit_stops['duration'].min()
+            st.metric("🏆 Fastest Stop", f"{fastest_stop:.3f}s")
         
-        Altitude: {highest_circuit['alt']:,}m
-        """)
+        with col3:
+            total_stops = len(filtered_pit_stops)
+            st.metric("🔢 Total Stops", f"{total_stops:,}")
+        
+        with col4:
+            avg_stops_per_race = len(filtered_pit_stops) / len(filtered_races_ids) if len(filtered_races_ids) > 0 else 0
+            st.metric("📊 Stops/Race", f"{avg_stops_per_race:.1f}")
+        
+        st.markdown("---")
+        
+        # Analysis Row 1
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### ⚡ Pit Stop Duration Distribution")
+            fig = px.histogram(
+                filtered_pit_stops[filtered_pit_stops['duration'] < 60],  # Filter outliers
+                x='duration',
+                nbins=50,
+                labels={'duration': 'Duration (seconds)'},
+                color_discrete_sequence=['#E10600']
+            )
+            fig.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### 🔢 Pit Stop Strategy")
+            stop_counts = filtered_pit_stops.groupby('stop').size().reset_index(name='count')
+            fig = px.bar(
+                stop_counts,
+                x='stop',
+                y='count',
+                labels={'stop': 'Stop Number', 'count': 'Frequency'},
+                color='count',
+                color_continuous_scale='Viridis'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Analysis Row 2
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### ⏱️ Pit Stop Timing (Lap)")
+            lap_stops = filtered_pit_stops.groupby('lap').size().reset_index(name='stops')
+            fig = px.line(
+                lap_stops,
+                x='lap',
+                y='stops',
+                markers=True,
+                labels={'lap': 'Lap Number', 'stops': 'Number of Stops'},
+                color_discrete_sequence=['#E10600']
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### 📈 Pit Stop Efficiency Trend")
+            # Average duration by lap
+            if 'lap' in filtered_pit_stops.columns:
+                efficiency = filtered_pit_stops.groupby('lap')['duration'].mean().reset_index()
+                fig = px.scatter(
+                    efficiency,
+                    x='lap',
+                    y='duration',
+                    trendline="lowess",
+                    labels={'lap': 'Lap Number', 'duration': 'Avg Duration (s)'},
+                    color_discrete_sequence=['#667eea']
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Top 10 Fastest Pit Stops
+        st.markdown("#### 🏆 Top 10 Fastest Pit Stops")
+        fastest_stops = filtered_pit_stops.nsmallest(10, 'duration')[['raceid', 'driverid', 'stop', 'lap', 'duration']]
+        fastest_stops['duration'] = fastest_stops['duration'].round(3)
+        st.dataframe(fastest_stops, use_container_width=True, hide_index=True)
+        
     else:
-        st.info("**⛰️ Altitude data not available**")
+        st.info("No pit stop data available for selected filters")
+    
+    st.markdown("---")
 
-with col2:
-    if len(filtered_races) > 0:
-        # Most races in a single year
-        races_per_year_temp = filtered_races.groupby('year').size().reset_index(name='races')
-        max_races_year = races_per_year_temp.loc[races_per_year_temp['races'].idxmax()]
-        st.success(f"""
-        **📅 Most Races in a Season**
+# ============================================================================
+# PHASE 3: PERFORMANCE ANALYSIS
+# ============================================================================
+if dashboard_section in ["Overview", "Performance Analysis"] and results is not None and constructors is not None:
+    st.header("🏁 Phase 3: Circuit-Team Performance")
+    
+    # Filter results for selected races
+    filtered_results = results[results['raceid'].isin(filtered_races_ids)]
+    
+    if len(filtered_results) > 0:
+        # Merge with constructors and circuits
+        perf_data = filtered_results.merge(
+            races[['raceid', 'circuitid', 'year']],
+            on='raceid',
+            how='left'
+        ).merge(
+            constructors[['constructorid', 'name']],
+            on='constructorid',
+            how='left'
+        ).merge(
+            circuits[['circuitid', 'name']],
+            on='circuitid',
+            how='left',
+            suffixes=('_constructor', '_circuit')
+        )
         
-        **{int(max_races_year['year'])}**
+        # Performance Metrics
+        col1, col2, col3, col4 = st.columns(4)
         
-        Total races: {int(max_races_year['races'])}
+        with col1:
+            total_results = len(filtered_results)
+            st.metric("📊 Total Results", f"{total_results:,}")
         
-        Busiest F1 calendar!
-        """)
+        with col2:
+            total_points = filtered_results['points'].sum()
+            st.metric("⭐ Total Points", f"{total_points:,.0f}")
+        
+        with col3:
+            unique_winners = filtered_results[filtered_results['position'] == 1]['driverid'].nunique()
+            st.metric("🏆 Unique Winners", unique_winners)
+        
+        with col4:
+            unique_constructors = filtered_results['constructorid'].nunique()
+            st.metric("🏗️ Teams", unique_constructors)
+        
+        st.markdown("---")
+        
+        # Analysis Row 1
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🏆 Top Constructors by Points")
+            if 'name_constructor' in perf_data.columns:
+                top_constructors = (
+                    perf_data.groupby('name_constructor')['points']
+                    .sum()
+                    .reset_index()
+                    .sort_values('points', ascending=False)
+                    .head(10)
+                )
+                
+                fig = px.bar(
+                    top_constructors,
+                    x='points',
+                    y='name_constructor',
+                    orientation='h',
+                    color='points',
+                    color_continuous_scale='Reds',
+                    labels={'name_constructor': 'Constructor', 'points': 'Total Points'}
+                )
+                fig.update_layout(
+                    yaxis={'categoryorder': 'total ascending'},
+                    height=400,
+                    showlegend=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### 🎯 Position Distribution")
+            position_dist = filtered_results[filtered_results['position'] <= 10]['position'].value_counts().sort_index()
+            position_df = pd.DataFrame({'position': position_dist.index, 'count': position_dist.values})
+            
+            fig = px.bar(
+                position_df,
+                x='position',
+                y='count',
+                labels={'position': 'Finishing Position', 'count': 'Frequency'},
+                color='count',
+                color_continuous_scale='Blues'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Analysis Row 2
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🏎️ Constructor Performance by Circuit")
+            if 'name_constructor' in perf_data.columns and 'name_circuit' in perf_data.columns:
+                # Top 5 constructors
+                top_5_constructors = (
+                    perf_data.groupby('name_constructor')['points']
+                    .sum()
+                    .nlargest(5)
+                    .index
+                )
+                
+                circuit_perf = (
+                    perf_data[perf_data['name_constructor'].isin(top_5_constructors)]
+                    .groupby(['name_circuit', 'name_constructor'])['points']
+                    .sum()
+                    .reset_index()
+                )
+                
+                # Top 10 circuits by total points
+                top_circuits = (
+                    circuit_perf.groupby('name_circuit')['points']
+                    .sum()
+                    .nlargest(10)
+                    .index
+                )
+                
+                circuit_perf_filtered = circuit_perf[circuit_perf['name_circuit'].isin(top_circuits)]
+                
+                fig = px.bar(
+                    circuit_perf_filtered,
+                    x='name_circuit',
+                    y='points',
+                    color='name_constructor',
+                    barmode='stack',
+                    labels={'name_circuit': 'Circuit', 'points': 'Points', 'name_constructor': 'Constructor'}
+                )
+                fig.update_layout(height=400, xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### 📊 Points vs Finishing Position")
+            if 'position' in filtered_results.columns and 'points' in filtered_results.columns:
+                pos_points = filtered_results[filtered_results['position'] <= 20].copy()
+                
+                fig = px.scatter(
+                    pos_points,
+                    x='position',
+                    y='points',
+                    opacity=0.6,
+                    labels={'position': 'Finishing Position', 'points': 'Points Scored'},
+                    color_discrete_sequence=['#E10600']
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Performance Table
+        st.markdown("#### 📋 Constructor Championship Standings")
+        if 'name_constructor' in perf_data.columns:
+            standings = (
+                perf_data.groupby('name_constructor')
+                .agg({
+                    'points': 'sum',
+                    'position': lambda x: (x == 1).sum()  # Wins
+                })
+                .reset_index()
+            )
+            standings.columns = ['Constructor', 'Total Points', 'Wins']
+            standings = standings.sort_values('Total Points', ascending=False).head(15)
+            standings['Total Points'] = standings['Total Points'].round(0).astype(int)
+            standings['Wins'] = standings['Wins'].astype(int)
+            st.dataframe(standings, use_container_width=True, hide_index=True)
+    
     else:
-        st.success("**📅 Select filters to see insights**")
-
-with col3:
-    if len(filtered_circuits) > 0:
-        # Geographic spread
-        lat_range = filtered_circuits['lat'].max() - filtered_circuits['lat'].min()
-        st.warning(f"""
-        **🌍 Geographic Spread**
-        
-        **{countries_count} Countries**
-        
-        Latitude range: {lat_range:.1f}°
-        
-        Truly global sport!
-        """)
-    else:
-        st.warning("**🌍 Select filters to see insights**")
+        st.info("No performance data available for selected filters")
+    
+    st.markdown("---")
 
 # ============================================================================
 # FOOTER
@@ -519,10 +593,13 @@ st.markdown("---")
 st.markdown("""
     <div style='text-align: center; color: #666; padding: 20px;'>
         <p style='font-size: 1.1em; margin-bottom: 10px;'>
-            🏎️ <strong>F1 Strategy Dashboard - Phase 1: Circuit Foundation</strong>
+            🏎️ <strong>F1 Strategy Dashboard - Complete Edition</strong>
         </p>
         <p style='font-size: 0.9em;'>
-            Built with Streamlit & Plotly | Next: Pit Stop Strategy Analysis
+            Phase 1: Circuits | Phase 2: Pit Stops | Phase 3: Performance
+        </p>
+        <p style='font-size: 0.8em; margin-top: 10px;'>
+            Built with Streamlit & Plotly | Portfolio Project
         </p>
     </div>
     """, unsafe_allow_html=True)
