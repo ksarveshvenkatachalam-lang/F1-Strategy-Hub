@@ -91,9 +91,25 @@ def load_pit_stops():
     try:
         pit_stops = pd.read_csv('pit_stops.csv')
         pit_stops.columns = pit_stops.columns.str.strip().str.lower()
-        # Convert duration to seconds if in milliseconds
-        if 'milliseconds' in pit_stops.columns and 'duration' not in pit_stops.columns:
-            pit_stops['duration'] = pit_stops['milliseconds'] / 1000
+        
+        # Convert duration to numeric, handling errors
+        if 'duration' in pit_stops.columns:
+            pit_stops['duration'] = pd.to_numeric(pit_stops['duration'], errors='coerce')
+        
+        # Convert milliseconds to seconds if needed
+        if 'milliseconds' in pit_stops.columns:
+            pit_stops['milliseconds'] = pd.to_numeric(pit_stops['milliseconds'], errors='coerce')
+            # If duration column doesn't exist or is mostly null, use milliseconds
+            if 'duration' not in pit_stops.columns or pit_stops['duration'].isna().sum() > len(pit_stops) * 0.5:
+                pit_stops['duration'] = pit_stops['milliseconds'] / 1000
+        
+        # Convert other numeric columns
+        pit_stops['lap'] = pd.to_numeric(pit_stops['lap'], errors='coerce')
+        pit_stops['stop'] = pd.to_numeric(pit_stops['stop'], errors='coerce')
+        
+        # Remove rows with invalid duration
+        pit_stops = pit_stops.dropna(subset=['duration'])
+        
         return pit_stops
     except Exception as e:
         st.error(f"Error loading pit_stops.csv: {e}")
@@ -116,9 +132,13 @@ def load_results():
     try:
         results = pd.read_csv('results.csv')
         results.columns = results.columns.str.strip().str.lower()
-        # Convert position to numeric
+        
+        # Convert position to numeric (handles 'R', 'D', 'E', 'W', 'F', 'N' for DNF/DNS/etc)
         results['position'] = pd.to_numeric(results['position'], errors='coerce')
-        results['points'] = pd.to_numeric(results['points'], errors='coerce')
+        results['points'] = pd.to_numeric(results['points'], errors='coerce').fillna(0)
+        results['grid'] = pd.to_numeric(results.get('grid', 0), errors='coerce')
+        results['laps'] = pd.to_numeric(results.get('laps', 0), errors='coerce')
+        
         return results
     except Exception as e:
         st.error(f"Error loading results.csv: {e}")
@@ -210,8 +230,11 @@ with col2:
 
 with col3:
     if pit_stops is not None:
-        filtered_pit_stops = pit_stops[pit_stops['raceid'].isin(filtered_races_ids)]
-        st.metric("🔧 Pit Stops", f"{len(filtered_pit_stops):,}")
+        filtered_pit_stops_count = pit_stops[
+            (pit_stops['raceid'].isin(filtered_races_ids)) &
+            (pit_stops['duration'].notna() if 'duration' in pit_stops.columns else True)
+        ]
+        st.metric("🔧 Pit Stops", f"{len(filtered_pit_stops_count):,}")
     else:
         st.metric("🔧 Pit Stops", "N/A")
 
@@ -316,7 +339,15 @@ if dashboard_section in ["Overview", "Pit Stop Strategy"] and pit_stops is not N
     st.header("🔧 Phase 2: Pit Stop Strategy Analysis")
     
     # Filter pit stops for selected races
-    filtered_pit_stops = pit_stops[pit_stops['raceid'].isin(filtered_races_ids)]
+    filtered_pit_stops = pit_stops[pit_stops['raceid'].isin(filtered_races_ids)].copy()
+    
+    # Additional validation - ensure duration is valid
+    if 'duration' in filtered_pit_stops.columns:
+        filtered_pit_stops = filtered_pit_stops[
+            (filtered_pit_stops['duration'].notna()) & 
+            (filtered_pit_stops['duration'] > 0) &
+            (filtered_pit_stops['duration'] < 300)  # Remove outliers > 5 minutes
+        ].copy()
     
     if len(filtered_pit_stops) > 0:
         # Pit Stop Metrics
@@ -345,15 +376,24 @@ if dashboard_section in ["Overview", "Pit Stop Strategy"] and pit_stops is not N
         
         with col1:
             st.markdown("#### ⚡ Pit Stop Duration Distribution")
-            fig = px.histogram(
-                filtered_pit_stops[filtered_pit_stops['duration'] < 60],  # Filter outliers
-                x='duration',
-                nbins=50,
-                labels={'duration': 'Duration (seconds)'},
-                color_discrete_sequence=['#E10600']
-            )
-            fig.update_layout(height=400, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+            # Filter for reasonable durations (0.5s to 60s)
+            valid_durations = filtered_pit_stops[
+                (filtered_pit_stops['duration'] >= 0.5) & 
+                (filtered_pit_stops['duration'] <= 60)
+            ]
+            
+            if len(valid_durations) > 0:
+                fig = px.histogram(
+                    valid_durations,
+                    x='duration',
+                    nbins=50,
+                    labels={'duration': 'Duration (seconds)'},
+                    color_discrete_sequence=['#E10600']
+                )
+                fig.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No valid pit stop data available")
         
         with col2:
             st.markdown("#### 🔢 Pit Stop Strategy")
