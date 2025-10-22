@@ -68,8 +68,15 @@ def load_circuits():
         # Clean column names - remove extra spaces and standardize
         circuits.columns = circuits.columns.str.strip().str.lower()
         
+        # Fix the first column name issue - rename 's' to 'circuitid' if it exists
+        if circuits.columns[0] == 's':
+            circuits.columns = ['circuitid'] + list(circuits.columns[1:])
+        elif 'circuitid' not in circuits.columns and len(circuits.columns) > 0:
+            # If first column is not 's' but also not 'circuitid', assume it's the ID
+            circuits.columns = ['circuitid'] + list(circuits.columns[1:])
+        
         # Show columns for debugging
-        st.sidebar.write("🔍 Circuits columns:", list(circuits.columns))
+        st.sidebar.write("🔍 Circuits columns (after fix):", list(circuits.columns))
         
         # Check for required columns
         required_cols = ['circuitid', 'name', 'location', 'country', 'lat', 'lng']
@@ -101,10 +108,10 @@ def load_races():
         races.columns = races.columns.str.strip().str.lower()
         
         # Show columns for debugging
-        st.sidebar.write("🔍 Races columns:", list(races.columns))
+        st.sidebar.write("🔍 Races columns (after clean):", list(races.columns))
         
         # Check for required columns
-        required_cols = ['raceid', 'year', 'circuitid', 'name', 'date']
+        required_cols = ['year', 'circuitid', 'name', 'date']
         missing = [col for col in required_cols if col not in races.columns]
         
         if missing:
